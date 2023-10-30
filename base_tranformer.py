@@ -169,7 +169,7 @@ class Transformer(nn.Module):
 # hyper parameters
 
 batch_size = 64
-lr = 0.01
+lr = 0.001
 n_epochs = 50
 
 num_transformers = 12
