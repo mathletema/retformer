@@ -35,28 +35,6 @@ net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), double_
 net.device = device
 print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
 
-# evaluate
-def evaluate(model, tokenizer, nsamples=40):
-    testenc = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-    testenc = tokenizer("\n\n".join(testenc['text']), return_tensors='pt')
-
-    testenc = testenc.input_ids.to(model.device)
-    model = model.eval()
-
-    nlls = []
-    for i in tqdm.tqdm(range(nsamples), desc="evaluating..."):
-        batch = testenc[:, (i * 2048):((i + 1) * 2048)].to(model.device)
-        with torch.no_grad():
-            lm_logits = model(batch).logits
-        shift_logits = lm_logits[:, :-1, :].contiguous().float()
-        shift_labels = testenc[:, (i * 2048):((i + 1) * 2048)][:, 1:]
-        loss_fct = nn.CrossEntropyLoss()
-        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-        neg_log_likelihood = loss.float() * 2048
-        nlls.append(neg_log_likelihood)
-
-    return torch.exp(torch.stack(nlls).sum() / (nsamples * 2048))
-
 # dataset
 CHUNK_SIZE = args.chunksize
 class WikiDataset(torch.utils.data.Dataset):
@@ -70,6 +48,27 @@ class WikiDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data) // self.CHUNK_SIZE
 train_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'train')
+val_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'validation')
+
+# evaluation
+def evaluate(model, nsamples=40):
+    model.eval()
+    criterion = nn.CrossEntropyLoss(reduction='mean')
+    nll = 0.0
+    counter = 0
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=1, shuffle=True)
+    for x,target in val_loader:
+        if counter == nsamples:
+            break
+        counter += 1
+        x,target=x.to(model.device),target.to(model.device)
+        with torch.no_grad():
+            pred = model(x)
+        loss = criterion(pred.view(-1, vocab_size), target.view(-1))
+        nll += loss.item()
+    
+    model.train()
+    return torch.exp(nll / (nsamples))
 
 # training
 BATCH_SIZE = args.batchsize
@@ -89,12 +88,13 @@ for epoch in range(EPOCHS):
         optimizer.zero_grad()
         pred = net(x)
         loss = criterion(pred.view(-1, vocab_size), target.view(-1))
+        # assert loss.ndim == 0
         loss.backward()
         optimizer.step()
         if (epoch % PRINT_EVERY) == 0:
             print(f"Loss: {loss.item()}")
     
-    print(f"Validation perplexity: {evaluate(net, tokenizer)}")
+    print(f"Validation perplexity: {evaluate(net)}")
 
 torch.save(net.state_dict(), 'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}.pth')
 torch.cuda.synchronize()
