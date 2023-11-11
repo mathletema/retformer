@@ -2,6 +2,7 @@ import tqdm
 import argparse
 import time
 import numpy as np
+import math
 
 import torch
 import torch.nn as nn
@@ -68,7 +69,7 @@ def evaluate(model, nsamples=40):
         nll += loss.item()
     
     model.train()
-    return torch.exp(nll / (nsamples))
+    return math.exp( nll / (nsamples))
 
 # training
 BATCH_SIZE = args.batchsize
@@ -94,7 +95,7 @@ for epoch in range(EPOCHS):
         if (epoch % PRINT_EVERY) == 0:
             print(f"Loss: {loss.item()}")
     
-    print(f"Validation perplexity: {evaluate(net)}")
+    print(f"Validation perplexity: {evaluate(net):.3f}")
 
 torch.save(net.state_dict(), 'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}.pth')
 torch.cuda.synchronize()
