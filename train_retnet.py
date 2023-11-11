@@ -54,7 +54,7 @@ class WikiDataset(torch.utils.data.Dataset):
 train_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'train')
 
 # training
-BATCH_SIZE = 64
+BATCH_SIZE = 2
 LR = 0.001
 EPOCHS = 50
 PRINT_EVERY = 100
