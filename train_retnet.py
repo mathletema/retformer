@@ -2,7 +2,7 @@ import tqdm
 import argparse
 import time
 import numpy as np
-import math
+import wandb
 
 import torch
 import torch.nn as nn
@@ -69,7 +69,7 @@ def evaluate(model, nsamples=40):
         nll += loss.item()
     
     model.train()
-    return math.exp( nll / (nsamples))
+    return np.exp( nll / (nsamples))
 
 # training
 BATCH_SIZE = args.batchsize
@@ -97,7 +97,6 @@ for epoch in range(EPOCHS):
     
     print(f"Validation perplexity: {evaluate(net):.3f}")
 
-torch.save(net.state_dict(), 'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}.pth')
 torch.cuda.synchronize()
 print(f'Transformer per-epoch training time: {(time.time() - start) / EPOCHS}')
 # test evaluation
@@ -111,4 +110,6 @@ with torch.no_grad():
         pred = net(x)
         loss = criterion(pred.view(-1, vocab_size), target.view(-1))
         total_loss += loss.item()
-print(f"Test perplexity {np.exp(total_loss / len(test_loader)  )}")
+perplexity = np.exp( total_loss / len(test_loader)  )
+print(f"Test perplexity {perplexity }")
+torch.save(net.state_dict(), f'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}_{perplexity:.3f}.pth')
