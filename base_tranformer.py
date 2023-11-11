@@ -223,3 +223,4 @@ for epoch in range(n_epochs):
 
   print(f"Validation perplexity {np.exp((total_loss / count))}")
 
+  torch.save(transformer.state_dict(), 'transformer.pth')
