@@ -14,6 +14,7 @@ class RetNet(nn.Module):
         self.v_dim = hidden_dim * 2 if double_v_dim else hidden_dim
 
         self.embed = nn.Embedding(vocab_size, hidden_dim)
+        self.proj = nn.Linear(hidden_dim, vocab_size)
         
         self.retentions = nn.ModuleList([
             MultiScaleRetention(hidden_dim, heads, double_v_dim)
@@ -40,11 +41,12 @@ class RetNet(nn.Module):
         """
         X: (batch_size, sequence_length, hidden_size)
         """
+        X = self.embed(X)
         for i in range(self.layers):
             Y = self.retentions[i](self.layer_norms_1[i](X)) + X
            
             X = self.ffns[i](self.layer_norms_2[i](Y)) + Y
-
+        X = self.proj(X)
         return X
 
     def forward_recurrent(self, x_n, s_n_1s, n):
