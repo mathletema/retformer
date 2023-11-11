@@ -1,20 +1,38 @@
+import tqdm
+import argparse
+import time
+import numpy as np
+
 import torch
 import torch.nn as nn
-import numpy as np
-import retnet
 from transformers import GPT2Tokenizer
 from datasets import load_dataset
-import tqdm
+
+import retnet
+
+#args
+parser = argparse.ArgumentParser(description='Retnet training')
+parser.add_argument('--dmodel', type=int, default=768)
+parser.add_argument('--dffn', type=int, default=1536)
+parser.add_argument('--nlayer', type=int, default=12)
+parser.add_argument('--nheads', type=int, default=12)
+parser.add_argument('--chunksize', type=int, default=2048)
+parser.add_argument('--batchsize', type=int, default=16)
+parser.add_argument('--lr', type=int, default=0.001)
+parser.add_argument('--numepochs', type=int, default=20)
+parser.add_argument('--printevery', type=int, default=100)
+args = parser.parse_args()
 
 #model
-layers = 2
-hidden_dim = 300
-ffn_size = hidden_dim * 2
-heads = 3
+layers = args.nlayer
+hidden_dim = args.dmodel
+ffn_size = args.dffn
+heads = args.nheads
 tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 vocab_size = len(tokenizer)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), double_v_dim=True).to(device)
+net.device = device
 print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
 
 # evaluate
@@ -40,7 +58,7 @@ def evaluate(model, tokenizer, nsamples=40):
     return torch.exp(torch.stack(nlls).sum() / (nsamples * 2048))
 
 # dataset
-CHUNK_SIZE = 2048
+CHUNK_SIZE = args.chunksize
 class WikiDataset(torch.utils.data.Dataset):
     def __init__(self, tokenizer, CHUNK_SIZE=CHUNK_SIZE, name='wikitext-2-raw-v1', split='train'):
         self.data = load_dataset('wikitext', name, split=split)
@@ -54,15 +72,15 @@ class WikiDataset(torch.utils.data.Dataset):
 train_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'train')
 
 # training
-BATCH_SIZE = 2
-LR = 0.001
-EPOCHS = 50
-PRINT_EVERY = 100
+BATCH_SIZE = args.batchsize
+LR = args.lr
+EPOCHS = args.numepochs
+PRINT_EVERY = args.printevery
 optimizer = torch.optim.Adam(net.parameters(), lr=LR)
 criterion = nn.CrossEntropyLoss(reduction='mean')
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
 
-
+start = time.time()
 for epoch in range(EPOCHS):
     print(f"Epoch {epoch+1}/{EPOCHS}")
     for x,target in tqdm.tqdm(train_loader):
@@ -78,8 +96,9 @@ for epoch in range(EPOCHS):
     
     print(f"Validation perplexity: {evaluate(net, tokenizer)}")
 
-torch.save(net.state_dict(), 'retnet.pth')
-
+torch.save(net.state_dict(), 'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}.pth')
+torch.cuda.synchronize()
+print(f'Transformer per-epoch training time: {(time.time() - start) / EPOCHS}')
 # test evaluation
 net.eval()
 test_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'test')
