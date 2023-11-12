@@ -77,12 +77,14 @@ LR = args.lr
 EPOCHS = args.numepochs
 PRINT_EVERY = args.printevery
 optimizer = torch.optim.Adam(net.parameters(), lr=LR)
+# optimizer = torch.optim.AdamW(net.parameters(), lr=LR, betas=(0.9, 0.98), eps=1e-9)
 criterion = nn.CrossEntropyLoss(reduction='mean')
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
 
 start = time.time()
 for epoch in range(EPOCHS):
     print(f"Epoch {epoch+1}/{EPOCHS}")
+    count = 0
     for x,target in tqdm.tqdm(train_loader):
         x,target = x.to(device),target.to(device)
 
@@ -92,8 +94,9 @@ for epoch in range(EPOCHS):
         # assert loss.ndim == 0
         loss.backward()
         optimizer.step()
-        if (epoch % PRINT_EVERY) == 0:
+        if (count % PRINT_EVERY) == 0:
             print(f"Loss: {loss.item()}")
+        count += 1
     
     print(f"Validation perplexity: {evaluate(net):.3f}")
 
