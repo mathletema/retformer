@@ -89,7 +89,8 @@ def main(args, rank, world_size):
 
     # training
     BATCH_SIZE = args.batchsize
-    LR = args.lr
+    LR1 = args.lr1
+    LR2 = args.lr2
     EPOCHS = args.numepochs
     PRINT_EVERY = args.printevery
     # optimizer = torch.optim.Adam(net.parameters(), lr=LR)
@@ -101,7 +102,7 @@ def main(args, rank, world_size):
     best_val_ppl = 1e9
     best_model = None
 
-    optimizer = torch.optim.AdamW(net.parameters(), lr=LR, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
+    optimizer = torch.optim.AdamW(net.parameters(), lr=LR1, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
     criterion = nn.CrossEntropyLoss(reduction='mean')
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
     
@@ -113,7 +114,7 @@ def main(args, rank, world_size):
             x,target = x.to(device),target.to(device)
             
             global_step = epoch * len(train_loader) + count
-            warmup_scheduler(optimizer, WARMUP_STEPS, LR, LR*0.1, global_step)
+            warmup_scheduler(optimizer, WARMUP_STEPS, LR1, LR2, global_step)
 
             optimizer.zero_grad()
             pred = net(x)
@@ -149,7 +150,8 @@ if __name__ == '__main__':
     parser.add_argument('--nheads', type=int, default=12)
     parser.add_argument('--chunksize', type=int, default=2048)
     parser.add_argument('--batchsize', type=int, default=16)
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--lr1', type=float, default=0.01)
+    parser.add_argument('--lr2', type=float, default=0.001)
     parser.add_argument('--beta1', type=float, default=0.9)
     parser.add_argument('--beta2', type=float, default=0.98)
     parser.add_argument('--weightdecay', type=float, default=0.05)
