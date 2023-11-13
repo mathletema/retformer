@@ -50,8 +50,8 @@ def evaluate(model, dataset, vocab_size, nsamples=40):
     criterion = nn.CrossEntropyLoss(reduction='mean')
     nll = 0.0
     counter = 0
-    val_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
-    for x,target in val_loader:
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
+    for x,target in data_loader:
         if counter == nsamples:
             break
         counter += 1
@@ -68,7 +68,9 @@ def main(args, rank, world_size):
     if args.isdistributed==1:
         dist.init_process_group("nccl")
         rank = dist.get_rank()
-
+        device = rank % torch.cuda.device_count()
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     #model
     layers = args.nlayer
     hidden_dim = args.dmodel
@@ -77,7 +79,7 @@ def main(args, rank, world_size):
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     vocab_size = len(tokenizer)
     drop_prob = args.dropprob
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     torch.manual_seed(0)
     net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=True).to(device)
     net.device = device
@@ -131,9 +133,9 @@ def main(args, rank, world_size):
             if count == 10:
                 break
         val_ppl = evaluate(net, val_set, vocab_size)
-        if best_model is None or val_ppl < best_val_ppl:
-            best_val_ppl = val_ppl
-            best_model = net.cpu()
+        # if best_model is None or val_ppl < best_val_ppl:
+        #     best_val_ppl = val_ppl
+        #     best_model = net.cpu()
         print(f"Validation perplexity: {val_ppl:.3f}")
 
     torch.cuda.synchronize()
