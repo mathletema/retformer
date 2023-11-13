@@ -65,6 +65,9 @@ def evaluate(model, dataset, vocab_size, nsamples=40):
     return np.exp( nll / (nsamples))
 
 def main(args, rank, world_size):
+    if args.isdistributed==1:
+        dist.init_process_group("nccl")
+        rank = dist.get_rank()
 
     #model
     layers = args.nlayer
@@ -125,6 +128,8 @@ def main(args, rank, world_size):
             if (count % PRINT_EVERY) == 0:
                 print(f"Loss: {loss.item()}")
             count += 1
+            if count == 10:
+                break
         val_ppl = evaluate(net, val_set, vocab_size)
         if best_model is None or val_ppl < best_val_ppl:
             best_val_ppl = val_ppl
@@ -136,11 +141,16 @@ def main(args, rank, world_size):
     # test evaluation
     test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
     test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
+    best_model.device = device
     test_ppl_best = evaluate(best_model.to(device), test_set, vocab_size, nsamples= len(test_set))
     
     print(f"Test perplexity {test_ppl }")
+    print(f"Best test perplexity {test_ppl }")
     torch.save(net.state_dict(), f'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}_{test_ppl:.3f}_final.pth')
     torch.save(net.state_dict(), f'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}_{test_ppl_best:.3f}_best.pth')
+    if args.isdistributed == 1:
+        dist.destroy_process_group()
+
 if __name__ == '__main__':
     #args
     parser = argparse.ArgumentParser(description='Retnet training')
@@ -160,5 +170,6 @@ if __name__ == '__main__':
     parser.add_argument('--numepochs', type=int, default=20)
     parser.add_argument('--printevery', type=int, default=100)
     parser.add_argument('--twoorthree', type=int, default=3)
+    parser.add_argument('--isdistributed', type=int, default=0)
     args = parser.parse_args()
     main(args, 0, 0)
