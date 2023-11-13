@@ -159,4 +159,4 @@ if __name__ == '__main__':
     parser.add_argument('--printevery', type=int, default=100)
     parser.add_argument('--twoorthree', type=int, default=3)
     args = parser.parse_args()
-    main(args)
+    main(args, 0, 0)
