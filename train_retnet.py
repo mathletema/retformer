@@ -27,6 +27,7 @@ parser.add_argument('--warmupsteps', type=int, default=375)
 parser.add_argument('--dropprob', type=float, default=0.1)
 parser.add_argument('--numepochs', type=int, default=20)
 parser.add_argument('--printevery', type=int, default=100)
+parser.add_argument('--twoorthree', type=int, default=3)
 args = parser.parse_args()
 
 #model
@@ -55,8 +56,9 @@ class WikiDataset(torch.utils.data.Dataset):
         return chunk[:-1], chunk[1:]
     def __len__(self):
         return len(self.data) // self.CHUNK_SIZE
-train_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'train')
-val_set = WikiDataset(tokenizer, CHUNK_SIZE, 'wikitext-2-raw-v1', 'validation')
+datasetname = 'wikitext-2-raw-v1' if args.twoorthree == 2 else 'wikitext-103-raw-v1'
+train_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'train')
+val_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'validation')
 
 # evaluation
 def evaluate(model, nsamples=40):
