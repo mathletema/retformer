@@ -4,7 +4,7 @@ import torch.nn as nn
 from retention import MultiScaleRetention
 
 class RetNet(nn.Module):
-    def __init__(self, layers, hidden_dim, ffn_size, heads, vocab_size, double_v_dim=False):
+    def __init__(self, layers, hidden_dim, ffn_size, heads, vocab_size, dropout, double_v_dim=False):
         super(RetNet, self).__init__()
         self.vocab_size = vocab_size
         self.layers = layers
@@ -15,6 +15,7 @@ class RetNet(nn.Module):
 
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.proj = nn.Linear(hidden_dim, vocab_size)
+        self.dropout = nn.Dropout(dropout)
         
         self.retentions = nn.ModuleList([
             MultiScaleRetention(hidden_dim, heads, double_v_dim)
@@ -43,9 +44,13 @@ class RetNet(nn.Module):
         """
         X = self.embed(X)
         for i in range(self.layers):
-            Y = self.retentions[i](self.layer_norms_1[i](X)) + X
-           
-            X = self.ffns[i](self.layer_norms_2[i](Y)) + Y
+            Y = self.retentions[i](self.layer_norms_1[i](X))
+            Y = self.dropout(Y)
+            Y = Y + X
+            Z = self.ffns[i](self.layer_norms_2[i](Y))
+            Z = self.dropout(Z)
+            X = Z + Y
+        X = self.dropout(X)
         X = self.proj(X)
         return X
 

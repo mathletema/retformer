@@ -19,7 +19,12 @@ parser.add_argument('--nlayer', type=int, default=12)
 parser.add_argument('--nheads', type=int, default=12)
 parser.add_argument('--chunksize', type=int, default=2048)
 parser.add_argument('--batchsize', type=int, default=16)
-parser.add_argument('--lr', type=int, default=0.001)
+parser.add_argument('--lr', type=float, default=0.001)
+parser.add_argument('--beta1', type=float, default=0.9)
+parser.add_argument('--beta2', type=float, default=0.98)
+parser.add_argument('--weightdecay', type=float, default=0.05)
+parser.add_argument('--warmupsteps', type=int, default=375)
+parser.add_argument('--dropprob', type=float, default=0.1)
 parser.add_argument('--numepochs', type=int, default=20)
 parser.add_argument('--printevery', type=int, default=100)
 args = parser.parse_args()
@@ -31,8 +36,10 @@ ffn_size = args.dffn
 heads = args.nheads
 tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 vocab_size = len(tokenizer)
+drop_prob = args.dropprob
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), double_v_dim=True).to(device)
+torch.manual_seed(0)
+net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=True).to(device)
 net.device = device
 print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
 
@@ -76,8 +83,22 @@ BATCH_SIZE = args.batchsize
 LR = args.lr
 EPOCHS = args.numepochs
 PRINT_EVERY = args.printevery
-optimizer = torch.optim.Adam(net.parameters(), lr=LR)
-# optimizer = torch.optim.AdamW(net.parameters(), lr=LR, betas=(0.9, 0.98), eps=1e-9)
+# optimizer = torch.optim.Adam(net.parameters(), lr=LR)
+BETA1 = args.beta1
+BETA2 = args.beta2
+WEIGHTDECAY = args.weightdecay
+WARMUP_STEPS = args.warmupsteps
+
+def warmup_scheduler(optimizer, warmup_steps, initial_lr, target_lr, step):
+    if step < warmup_steps:
+        lr = initial_lr + (target_lr - initial_lr) * step / warmup_steps
+    else:
+        lr = target_lr
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
+
+optimizer = torch.optim.AdamW(net.parameters(), lr=LR, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
 criterion = nn.CrossEntropyLoss(reduction='mean')
 train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
 
@@ -87,6 +108,9 @@ for epoch in range(EPOCHS):
     count = 0
     for x,target in tqdm.tqdm(train_loader):
         x,target = x.to(device),target.to(device)
+        
+        global_step = epoch * len(train_loader) + count
+        warmup_scheduler(optimizer, WARMUP_STEPS, LR, LR*0.1, global_step)
 
         optimizer.zero_grad()
         pred = net(x)
