@@ -133,9 +133,12 @@ def main(args, rank, world_size):
             if count == 10:
                 break
         val_ppl = evaluate(net, val_set, vocab_size)
-        # if best_model is None or val_ppl < best_val_ppl:
-        #     best_val_ppl = val_ppl
-        #     best_model = net.cpu()
+        if best_model is None or val_ppl < best_val_ppl:
+            best_val_ppl = val_ppl
+            best_model = net.cpu()
+            print(f"{net.device=}")
+            print(f"{best_model.device=}")
+            net.device = device
         print(f"Validation perplexity: {val_ppl:.3f}")
 
     torch.cuda.synchronize()
