@@ -70,6 +70,7 @@ def main(args, rank, world_size):
         rank = dist.get_rank()
         device = rank % torch.cuda.device_count()
     else:
+        rank = 0
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     #model
     layers = args.nlayer
@@ -133,9 +134,11 @@ def main(args, rank, world_size):
                 print(f"Loss: {loss.item()}")
             count += 1
         val_ppl = evaluate(net, val_set, vocab_size)
-        if val_ppl < best_val_ppl and epoch > EPOCHS * 0.75:
+        if val_ppl < best_val_ppl and epoch > EPOCHS * 0.75 and rank==0:
             best_val_ppl = val_ppl
             torch.save(net.state_dict(), f'{args.savenamebest}.pth')
+        if args.isdistributed == 1:
+            dist.barrier()
         print(f"Validation perplexity: {val_ppl:.3f}")
 
     torch.cuda.synchronize()
