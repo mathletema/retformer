@@ -132,10 +132,8 @@ def main(args, rank, world_size):
             if (count % PRINT_EVERY) == 0:
                 print(f"Loss: {loss.item()}")
             count += 1
-            if count == 10:
-                break
         val_ppl = evaluate(net, val_set, vocab_size)
-        if val_ppl < best_val_ppl:
+        if val_ppl < best_val_ppl and epoch > EPOCHS * 0.75:
             best_val_ppl = val_ppl
             torch.save(net.state_dict(), f'{args.savenamebest}.pth')
         print(f"Validation perplexity: {val_ppl:.3f}")
