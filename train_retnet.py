@@ -64,7 +64,7 @@ def evaluate(model, dataset, vocab_size, nsamples=40):
     model.train()
     return np.exp( nll / (nsamples))
 
-def main(args, rank, world_size):
+def main(args):
     if args.isdistributed==1:
         dist.init_process_group("nccl")
         rank = dist.get_rank()
@@ -130,25 +130,28 @@ def main(args, rank, world_size):
             # assert loss.ndim == 0
             loss.backward()
             optimizer.step()
-            if (count % PRINT_EVERY) == 0:
+            if (count % PRINT_EVERY) == 0 and rank == 0:
                 print(f"Loss: {loss.item()}")
             count += 1
         val_ppl = evaluate(net, val_set, vocab_size)
         if val_ppl < best_val_ppl and epoch > EPOCHS * 0.75 and rank==0:
             best_val_ppl = val_ppl
             torch.save(net.state_dict(), f'{args.savenamebest}.pth')
+
+        if rank == 0:
+            print(f"Validation perplexity: {val_ppl:.3f}")
         if args.isdistributed == 1:
             dist.barrier()
-        print(f"Validation perplexity: {val_ppl:.3f}")
 
     torch.cuda.synchronize()
-    print(f'Transformer per-epoch training time: {(time.time() - start) / EPOCHS}')
-    # test evaluation
-    test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
-    test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
+    if rank == 0:
+        print(f'Transformer per-epoch training time: {(time.time() - start) / EPOCHS}')
+        # test evaluation
+        test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
+        test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
     
-    print(f"Test perplexity {test_ppl }")
-    torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
+        print(f"Test perplexity {test_ppl }")
+        torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
     if args.isdistributed == 1:
         dist.destroy_process_group()
 
@@ -175,4 +178,4 @@ if __name__ == '__main__':
     parser.add_argument('--savenamebest', type=str, default='retnet_best')
     parser.add_argument('--savenamefinal', type=str, default='retnet_final')
     args = parser.parse_args()
-    main(args, 0, 0)
+    main(args)
