@@ -81,8 +81,11 @@ def main(args, rank, world_size):
     drop_prob = args.dropprob
     
     torch.manual_seed(0)
+    
     net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=True).to(device)
     net.device = device
+    if args.isdistributed==1:
+        net = DDP(net, device_ids=[device])
     print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
 
     # dataset
@@ -104,8 +107,7 @@ def main(args, rank, world_size):
     WEIGHTDECAY = args.weightdecay
     WARMUP_STEPS = args.warmupsteps
     
-    best_val_ppl = 1e9
-    best_model = None
+    best_val_ppl = float('inf')
 
     optimizer = torch.optim.AdamW(net.parameters(), lr=LR1, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
     criterion = nn.CrossEntropyLoss(reduction='mean')
@@ -133,12 +135,9 @@ def main(args, rank, world_size):
             if count == 10:
                 break
         val_ppl = evaluate(net, val_set, vocab_size)
-        if best_model is None or val_ppl < best_val_ppl:
+        if val_ppl < best_val_ppl:
             best_val_ppl = val_ppl
-            best_model = net.cpu()
-            print(f"{net.device=}")
-            print(f"{best_model.device=}")
-            net.device = device
+            torch.save(net.state_dict(), f'{args.savenamebest}.pth')
         print(f"Validation perplexity: {val_ppl:.3f}")
 
     torch.cuda.synchronize()
@@ -146,13 +145,9 @@ def main(args, rank, world_size):
     # test evaluation
     test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
     test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
-    best_model.device = device
-    test_ppl_best = evaluate(best_model.to(device), test_set, vocab_size, nsamples= len(test_set))
     
     print(f"Test perplexity {test_ppl }")
-    print(f"Best test perplexity {test_ppl }")
-    torch.save(net.state_dict(), f'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}_{test_ppl:.3f}_final.pth')
-    torch.save(net.state_dict(), f'retnet_{layers}_{hidden_dim}_{ffn_size}_{heads}_{test_ppl_best:.3f}_best.pth')
+    torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
     if args.isdistributed == 1:
         dist.destroy_process_group()
 
@@ -176,5 +171,7 @@ if __name__ == '__main__':
     parser.add_argument('--printevery', type=int, default=100)
     parser.add_argument('--twoorthree', type=int, default=3)
     parser.add_argument('--isdistributed', type=int, default=0)
+    parser.add_argument('--savenamebest', type=str, default='retnet_best')
+    parser.add_argument('--savenamefinal', type=str, default='retnet_final')
     args = parser.parse_args()
     main(args, 0, 0)
