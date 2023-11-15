@@ -65,107 +65,111 @@ def evaluate(model, dataset, vocab_size, nsamples=40):
     return np.exp( nll / (nsamples))
 
 def main(args):
-    if args.isdistributed==1:
-        dist.init_process_group("nccl")
-        rank = dist.get_rank()
-        device = rank % torch.cuda.device_count()
-    else:
-        rank = 0
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    #model
-    layers = args.nlayer
-    hidden_dim = args.dmodel
-    ffn_size = args.dffn
-    heads = args.nheads
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    vocab_size = len(tokenizer)
-    drop_prob = args.dropprob
-    
-    torch.manual_seed(0)
-    
-    net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
-    net.device = device
-    if args.isdistributed==1:
-        net = DDP(net, device_ids=[device])
-    print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
+    try:
+        if args.isdistributed==1:
+            dist.init_process_group("nccl")
+            rank = dist.get_rank()
+            device = rank % torch.cuda.device_count()
+        else:
+            rank = 0
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #model
+        layers = args.nlayer
+        hidden_dim = args.dmodel
+        ffn_size = args.dffn
+        heads = args.nheads
+        tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+        vocab_size = len(tokenizer)
+        drop_prob = args.dropprob
+        
+        torch.manual_seed(0)
+        
+        net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
+        net.device = device
+        if args.isdistributed==1:
+            net = DDP(net, device_ids=[device])
+        print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
 
-    # dataset
-    CHUNK_SIZE = args.chunksize
-    
-    datasetname = 'wikitext-2-raw-v1' if args.twoorthree == 2 else 'wikitext-103-raw-v1'
-    train_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'train')
-    val_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'validation')
+        # dataset
+        CHUNK_SIZE = args.chunksize
+        
+        datasetname = 'wikitext-2-raw-v1' if args.twoorthree == 2 else 'wikitext-103-raw-v1'
+        train_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'train')
+        val_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'validation')
 
-    # training
-    BATCH_SIZE = args.batchsize
-    LR1 = args.lr1
-    LR2 = args.lr2
-    EPOCHS = args.numepochs
-    PRINT_EVERY = args.printevery
-    # optimizer = torch.optim.Adam(net.parameters(), lr=LR)
-    BETA1 = args.beta1
-    BETA2 = args.beta2
-    WEIGHTDECAY = args.weightdecay
-    WARMUP_STEPS = args.warmupsteps
-    
-    best_val_ppl = float('inf')
+        # training
+        BATCH_SIZE = args.batchsize
+        LR1 = args.lr1
+        LR2 = args.lr2
+        EPOCHS = args.numepochs
+        PRINT_EVERY = args.printevery
+        # optimizer = torch.optim.Adam(net.parameters(), lr=LR)
+        BETA1 = args.beta1
+        BETA2 = args.beta2
+        WEIGHTDECAY = args.weightdecay
+        WARMUP_STEPS = args.warmupsteps
+        
+        best_val_ppl = float('inf')
 
-    optimizer = torch.optim.AdamW(net.parameters(), lr=LR1, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
-    criterion = nn.CrossEntropyLoss(reduction='mean')
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-    if rank == 0:
-        start = time.time()
-    for epoch in range(EPOCHS):
-        print(f"Epoch {epoch+1}/{EPOCHS}")
-        count = 0
-        for x,target in tqdm.tqdm(train_loader):
-            x,target = x.to(device),target.to(device)
-            
-            global_step = epoch * len(train_loader) + count
-            warmup_scheduler(optimizer, WARMUP_STEPS, LR1, LR2, global_step)
-
-            optimizer.zero_grad()
-            pred = net(x)
-            loss = criterion(pred.view(-1, vocab_size), target.view(-1))
-            # assert loss.ndim == 0
-            loss.backward()
-            optimizer.step()
-            if (count % PRINT_EVERY) == 0 and rank == 0:
-                print(f"Loss: {loss.item()}")
-            count += 1
-        if rank == 0 and args.isdistributed == 1:
-            val_ppl = evaluate(net, val_set, vocab_size)
-            if val_ppl < best_val_ppl and epoch > 5 and rank==0:
-                best_val_ppl = val_ppl
-                torch.save(net.module.state_dict(), f'{args.savenamebest}.pth')
-        elif args.isdistributed == 0:
-            val_ppl = evaluate(net, val_set, vocab_size)
-            if val_ppl < best_val_ppl and epoch > 5:
-                best_val_ppl = val_ppl
-                torch.save(net.state_dict(), f'{args.savenamebest}.pth')
-
+        optimizer = torch.optim.AdamW(net.parameters(), lr=LR1, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
+        criterion = nn.CrossEntropyLoss(reduction='mean')
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
         if rank == 0:
-            print(f"Validation perplexity: {val_ppl:.3f}")
+            start = time.time()
+        for epoch in range(EPOCHS):
+            print(f"Epoch {epoch+1}/{EPOCHS}")
+            count = 0
+            for x,target in tqdm.tqdm(train_loader):
+                x,target = x.to(device),target.to(device)
+                
+                global_step = epoch * len(train_loader) + count
+                warmup_scheduler(optimizer, WARMUP_STEPS, LR1, LR2, global_step)
+
+                optimizer.zero_grad()
+                pred = net(x)
+                loss = criterion(pred.view(-1, vocab_size), target.view(-1))
+                # assert loss.ndim == 0
+                loss.backward()
+                optimizer.step()
+                if (count % PRINT_EVERY) == 0 and rank == 0:
+                    print(f"Loss: {loss.item()}")
+                count += 1
+            if rank == 0 and args.isdistributed == 1:
+                val_ppl = evaluate(net, val_set, vocab_size)
+                if val_ppl < best_val_ppl and epoch > 5 and rank==0:
+                    best_val_ppl = val_ppl
+                    torch.save(net.module.state_dict(), f'{args.savenamebest}.pth')
+            elif args.isdistributed == 0:
+                val_ppl = evaluate(net, val_set, vocab_size)
+                if val_ppl < best_val_ppl and epoch > 5:
+                    best_val_ppl = val_ppl
+                    torch.save(net.state_dict(), f'{args.savenamebest}.pth')
+
+            if rank == 0:
+                print(f"Validation perplexity: {val_ppl:.3f}")
+            if args.isdistributed == 1:
+                dist.barrier()
+
+        
+        if rank == 0:
+            
+            torch.cuda.synchronize()
+            print(f'Retnet per-epoch training time: {(time.time() - start) / EPOCHS}')
+            # test evaluation
+            test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
+            test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
+        
+            print(f"Test perplexity {test_ppl }")
+            if args.isdistributed == 1:
+                torch.save(net.module.state_dict(), f'{args.savenamefinal}.pth')
+            else:
+                torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
+    except Exception as e:
+        print(f"Error in training: {e}")
+    finally:
         if args.isdistributed == 1:
             dist.barrier()
-
-    
-    if rank == 0:
-        
-        torch.cuda.synchronize()
-        print(f'Retnet per-epoch training time: {(time.time() - start) / EPOCHS}')
-        # test evaluation
-        test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
-        test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
-    
-        print(f"Test perplexity {test_ppl }")
-        if args.isdistributed == 1:
-            torch.save(net.module.state_dict(), f'{args.savenamefinal}.pth')
-        else:
-            torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
-    if args.isdistributed == 1:
-        dist.barrier()
-        dist.destroy_process_group()
+            dist.destroy_process_group()
 
 if __name__ == '__main__':
     #args
