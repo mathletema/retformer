@@ -88,7 +88,8 @@ def main(args):
         net.device = device
         if args.isdistributed==1:
             net = DDP(net, device_ids=[device])
-        print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
+        if rank == 0:
+            print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
 
         # dataset
         CHUNK_SIZE = args.chunksize
