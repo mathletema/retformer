@@ -14,7 +14,9 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
-import retnet
+# import retnet
+from transformer import Transformer
+
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -83,7 +85,7 @@ def main(args):
     
     torch.manual_seed(0)
     
-    net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
+    net = Transformer(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=True).to(device)
     net.device = device
     if args.isdistributed==1:
         net = DDP(net, device_ids=[device])
@@ -113,8 +115,8 @@ def main(args):
     optimizer = torch.optim.AdamW(net.parameters(), lr=LR1, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
     criterion = nn.CrossEntropyLoss(reduction='mean')
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-    if rank == 0:
-        start = time.time()
+    
+    start = time.time()
     for epoch in range(EPOCHS):
         print(f"Epoch {epoch+1}/{EPOCHS}")
         count = 0
@@ -133,38 +135,26 @@ def main(args):
             if (count % PRINT_EVERY) == 0 and rank == 0:
                 print(f"Loss: {loss.item()}")
             count += 1
-        if rank == 0 and args.isdistributed == 1:
-            val_ppl = evaluate(net, val_set, vocab_size)
-            if val_ppl < best_val_ppl and epoch > 5 and rank==0:
-                best_val_ppl = val_ppl
-                torch.save(net.module.state_dict(), f'{args.savenamebest}.pth')
-        elif args.isdistributed == 0:
-            val_ppl = evaluate(net, val_set, vocab_size)
-            if val_ppl < best_val_ppl and epoch > 5:
-                best_val_ppl = val_ppl
-                torch.save(net.state_dict(), f'{args.savenamebest}.pth')
+        val_ppl = evaluate(net, val_set, vocab_size)
+        if val_ppl < best_val_ppl and epoch > 5 and rank==0:
+            best_val_ppl = val_ppl
+            torch.save(net.state_dict(), f'{args.savenamebest}.pth')
 
         if rank == 0:
             print(f"Validation perplexity: {val_ppl:.3f}")
         if args.isdistributed == 1:
             dist.barrier()
 
-    
+    torch.cuda.synchronize()
     if rank == 0:
-        
-        torch.cuda.synchronize()
-        print(f'Retnet per-epoch training time: {(time.time() - start) / EPOCHS}')
+        print(f'Transformer per-epoch training time: {(time.time() - start) / EPOCHS}')
         # test evaluation
         test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
         test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
     
         print(f"Test perplexity {test_ppl }")
-        if args.isdistributed == 1:
-            torch.save(net.module.state_dict(), f'{args.savenamefinal}.pth')
-        else:
-            torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
+        torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
     if args.isdistributed == 1:
-        dist.barrier()
         dist.destroy_process_group()
 
 if __name__ == '__main__':
@@ -187,7 +177,7 @@ if __name__ == '__main__':
     parser.add_argument('--printevery', type=int, default=100)
     parser.add_argument('--twoorthree', type=int, default=3)
     parser.add_argument('--isdistributed', type=int, default=0)
-    parser.add_argument('--savenamebest', type=str, default='retnet_best')
-    parser.add_argument('--savenamefinal', type=str, default='retnet_final')
+    parser.add_argument('--savenamebest', type=str, default='transformer_best')
+    parser.add_argument('--savenamefinal', type=str, default='transformer_final')
     args = parser.parse_args()
     main(args)

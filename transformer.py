@@ -1,7 +1,7 @@
 import torch
-from torch import nn, optim
+from torch import nn
 from torch.nn import functional as F
-
+import numpy as np
 NEG_INF = -1e9
 
 class AttentionHead(nn.Module):
