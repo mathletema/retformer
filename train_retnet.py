@@ -137,12 +137,12 @@ def main(args):
                 count += 1
             if rank == 0 and args.isdistributed == 1:
                 val_ppl = evaluate(net, val_set, vocab_size)
-                if val_ppl < best_val_ppl and epoch > 5 and rank==0:
+                if val_ppl < best_val_ppl and rank==0:
                     best_val_ppl = val_ppl
                     torch.save(net.module.state_dict(), f'{args.savenamebest}.pth')
             elif args.isdistributed == 0:
                 val_ppl = evaluate(net, val_set, vocab_size)
-                if val_ppl < best_val_ppl and epoch > 5:
+                if val_ppl < best_val_ppl:
                     best_val_ppl = val_ppl
                     torch.save(net.state_dict(), f'{args.savenamebest}.pth')
 
