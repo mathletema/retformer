@@ -12,7 +12,7 @@ from datasets import load_dataset
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
-
+from torch.utils.data.distributed import DistributedSampler
 
 import retnet
 
@@ -25,7 +25,13 @@ def setup(rank, world_size):
 
 def cleanup():
     dist.destroy_process_group()
+def set_random_seeds(seed=0):
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
 
+    
 def warmup_scheduler(optimizer, warmup_steps, initial_lr, target_lr, step):
     if step < warmup_steps:
         lr = initial_lr + (target_lr - initial_lr) * step / warmup_steps
@@ -38,34 +44,36 @@ def warmup_scheduler(optimizer, warmup_steps, initial_lr, target_lr, step):
 class WikiDataset(torch.utils.data.Dataset):
     def __init__(self, tokenizer, CHUNK_SIZE, name='wikitext-2-raw-v1', split='train'):
         self.data = load_dataset('wikitext', name, split=split)
+        print("Length of dataset: ", len(self.data['text']))
         self.data = tokenizer("\n\n".join(self.data['text']), return_tensors='pt').input_ids[0]
+        print("Shape of tokens dataset: ", self.data.shape)
         self.CHUNK_SIZE = CHUNK_SIZE
     def __getitem__(self, idx):
         chunk= self.data[idx * self.CHUNK_SIZE:(idx + 1) * self.CHUNK_SIZE]
         return chunk[:-1], chunk[1:]
     def __len__(self):
         return len(self.data) // self.CHUNK_SIZE
-def evaluate(model, dataset, vocab_size, nsamples=40):
+def evaluate(model, data_loader, vocab_size, nsamples=40):
     model.eval()
     criterion = nn.CrossEntropyLoss(reduction='mean')
     nll = 0.0
     counter = 0
-    data_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
-    for x,target in data_loader:
-        if counter == nsamples:
-            break
-        counter += 1
-        x,target=x.to(model.device),target.to(model.device)
-        with torch.no_grad():
-            pred = model(x)
-        loss = criterion(pred.view(-1, vocab_size), target.view(-1))
-        nll += loss.item()
     
-    model.train()
+    with torch.no_grad():
+        for x,target in data_loader:
+            if counter == nsamples:
+                break
+            counter += 1
+            x,target=x.to(model.device),target.to(model.device)
+            pred = model(x)
+            loss = criterion(pred.view(-1, vocab_size), target.view(-1))
+            nll += loss.item()
+    
     return np.exp( nll / (nsamples))
 
 def main(args):
     try:
+        set_random_seeds(args.randomseed)
         if args.isdistributed==1:
             dist.init_process_group("nccl")
             rank = dist.get_rank()
@@ -73,6 +81,7 @@ def main(args):
         else:
             rank = 0
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         #model
         layers = args.nlayer
         hidden_dim = args.dmodel
@@ -82,21 +91,27 @@ def main(args):
         vocab_size = len(tokenizer)
         drop_prob = args.dropprob
         
-        torch.manual_seed(0)
-        
+        time_model_loading_start = time.time()
         net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
         net.device = device
         if args.isdistributed==1:
             net = DDP(net, device_ids=[device])
         if rank == 0:
             print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
+        if args.resumefilename != '' and args.isdistributed==1:
+            map_location = {'cuda:0': f'cuda:{device}'}
+            state_dict = torch.load(args.resumefilename, map_location=map_location)
+            net.load_state_dict(state_dict)
+        print(f"Time to load model (device {device}): {time.time() - time_model_loading_start}")
 
         # dataset
         CHUNK_SIZE = args.chunksize
-        
+        time_data = time.time()
         datasetname = 'wikitext-2-raw-v1' if args.twoorthree == 2 else 'wikitext-103-raw-v1'
         train_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'train')
         val_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'validation')
+        test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
+        print(f"Time to load data (device {device}): {time.time() - time_data}")
 
         # training
         BATCH_SIZE = args.batchsize
@@ -114,12 +129,35 @@ def main(args):
 
         optimizer = torch.optim.AdamW(net.parameters(), lr=LR1, betas=(BETA1, BETA2), weight_decay=WEIGHTDECAY)
         criterion = nn.CrossEntropyLoss(reduction='mean')
-        train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-        if rank == 0:
-            start = time.time()
+        
+        time_train_loader = time.time()
+        train_sampler = DistributedSampler(train_set)
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, sampler=train_sampler, pin_memory=True, num_workers=8)
+        val_loader = torch.utils.data.DataLoader(val_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
+        test_loader = torch.utils.data.DataLoader(test_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
+        
+        print(f"Time to create train, val, test loader and sampler (device {device}): {time.time() - time_train_loader}")
+
+        print(f"Length of train set over batch size (device {device}): {len(train_set) // BATCH_SIZE}")
+        print(f"Length of train_loader (device {device}): {len(train_loader)}")
+            
+
         for epoch in range(EPOCHS):
             print(f"Epoch {epoch+1}/{EPOCHS}")
+            time_epoch_start = time.time()
             count = 0
+            if rank == 0:
+                validation_start_time = time.time()
+                val_ppl = evaluate(net, val_loader, vocab_size, nsamples=len(val_set))
+                if val_ppl < best_val_ppl:
+                    best_val_ppl = val_ppl
+                    torch.save(net.state_dict(), f'{args.savenamebest}.pth')
+                print(f"Time to validate: {time.time() - validation_start_time}")
+                print(f"Validation perplexity: {val_ppl:.3f}")
+            if args.isdistributed==1:
+                dist.barrier()
+            print(f"Starting training on device {device}")
+            net.train()
             for x,target in tqdm.tqdm(train_loader):
                 x,target = x.to(device),target.to(device)
                 
@@ -132,39 +170,25 @@ def main(args):
                 # assert loss.ndim == 0
                 loss.backward()
                 optimizer.step()
-                if (count % PRINT_EVERY) == 0 and rank == 0:
-                    print(f"Loss: {loss.item()}")
+                if (count % PRINT_EVERY) == 0:
+                    print(f"Loss (device {device}): {loss.item()}")
                 count += 1
-            if rank == 0 and args.isdistributed == 1:
-                val_ppl = evaluate(net, val_set, vocab_size)
-                if val_ppl < best_val_ppl and rank==0:
-                    best_val_ppl = val_ppl
-                    torch.save(net.module.state_dict(), f'{args.savenamebest}.pth')
-            elif args.isdistributed == 0:
-                val_ppl = evaluate(net, val_set, vocab_size)
-                if val_ppl < best_val_ppl:
-                    best_val_ppl = val_ppl
-                    torch.save(net.state_dict(), f'{args.savenamebest}.pth')
-
+            
             if rank == 0:
-                print(f"Validation perplexity: {val_ppl:.3f}")
-            if args.isdistributed == 1:
-                dist.barrier()
+                time_save_final_start = time.time()
+                torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
+                print("Time to save final model: ", time.time() - time_save_final_start)
+      
+            
+            print(f"Time to train epoch (device {device}): {time.time() - time_epoch_start}")
 
         
         if rank == 0:
-            
-            torch.cuda.synchronize()
-            print(f'Retnet per-epoch training time: {(time.time() - start) / EPOCHS}')
-            # test evaluation
-            test_set = WikiDataset(tokenizer, CHUNK_SIZE, datasetname, 'test')
-            test_ppl = evaluate(net, test_set, vocab_size, nsamples= len(test_set))
-        
+            time_test_start = time.time()
+            test_ppl = evaluate(net, test_loader, vocab_size, nsamples= len(test_set))
             print(f"Test perplexity {test_ppl }")
-            if args.isdistributed == 1:
-                torch.save(net.module.state_dict(), f'{args.savenamefinal}.pth')
-            else:
-                torch.save(net.state_dict(), f'{args.savenamefinal}.pth')
+            print(f"Time to test: {time.time() - time_test_start}")
+            
     except Exception as e:
         print(f"Error in training: {e}")
     finally:
@@ -194,5 +218,7 @@ if __name__ == '__main__':
     parser.add_argument('--isdistributed', type=int, default=0)
     parser.add_argument('--savenamebest', type=str, default='retnet_best')
     parser.add_argument('--savenamefinal', type=str, default='retnet_final')
+    parser.add_argument('--resumefilename', type=str, default='')
+    parser.add_argument('--randomseed', type=int, default=0)
     args = parser.parse_args()
     main(args)
