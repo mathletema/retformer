@@ -148,12 +148,13 @@ def main(args):
             count = 0
             if rank == 0:
                 validation_start_time = time.time()
-                val_ppl = evaluate(net, val_loader, vocab_size, nsamples=len(val_set))
+                val_ppl = evaluate(net, val_loader, vocab_size, nsamples= (len(val_set) if args.numsteps == -1 else args.numsteps) )
                 if val_ppl < best_val_ppl:
                     best_val_ppl = val_ppl
                     torch.save(net.state_dict(), f'{args.savenamebest}.pth')
                 print(f"Time to validate: {time.time() - validation_start_time}")
                 print(f"Validation perplexity: {val_ppl:.3f}")
+            print(f"Reached the training barrier (device {device})")
             if args.isdistributed==1:
                 dist.barrier()
             print(f"Starting training on device {device}")
@@ -173,6 +174,8 @@ def main(args):
                 if (count % PRINT_EVERY) == 0:
                     print(f"Loss (device {device}): {loss.item()}")
                 count += 1
+                if count == args.numsteps: # used for testing correctness
+                    break
             
             if rank == 0:
                 time_save_final_start = time.time()
@@ -185,7 +188,7 @@ def main(args):
         
         if rank == 0:
             time_test_start = time.time()
-            test_ppl = evaluate(net, test_loader, vocab_size, nsamples= len(test_set))
+            test_ppl = evaluate(net, test_loader, vocab_size, nsamples= (len(test_set) if args.numsteps == -1 else args.numsteps))
             print(f"Test perplexity {test_ppl }")
             print(f"Time to test: {time.time() - time_test_start}")
             
@@ -220,5 +223,6 @@ if __name__ == '__main__':
     parser.add_argument('--savenamefinal', type=str, default='retnet_final')
     parser.add_argument('--resumefilename', type=str, default='')
     parser.add_argument('--randomseed', type=int, default=0)
+    parser.add_argument('--numsteps', type=int, default=-1, help="number of steps to run, -1 for full dataset")
     args = parser.parse_args()
     main(args)
