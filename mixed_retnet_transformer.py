@@ -17,6 +17,8 @@ class MixedRetNetTransformer(nn.Module):
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.proj = nn.Linear(hidden_dim, vocab_size)
         self.dropout = nn.Dropout(dropout)
+        self.binary_vector = binary_vector
+        self.register_buffer("mask", None)
         
         self.retentions = nn.ModuleList([
             MultiScaleRetention(hidden_dim, heads, double_v_dim) if binary_vector[i]=="1" else MultiHeadedAttention(hidden_dim, heads)
@@ -44,8 +46,13 @@ class MixedRetNetTransformer(nn.Module):
         X: (batch_size, sequence_length, hidden_size)
         """
         X = self.embed(X)
+        if self.mask is None or self.mask.shape[0] != X.shape[1]:
+            self.mask = torch.ones(X.shape[1], X.shape[1]).tril().to(X.device)
         for i in range(self.layers):
-            Y = self.retentions[i](self.layer_norms_1[i](X))
+            if self.binary_vector[i] == "1":
+                Y = self.retentions[i](self.layer_norms_1[i](X))
+            else:
+                Y = self.attentions[i](self.layer_norms_1[i](X), self.mask)
             Y = self.dropout(Y)
             Y = Y + X
             Z = self.ffns[i](self.layer_norms_2[i](Y))
