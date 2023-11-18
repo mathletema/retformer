@@ -52,7 +52,7 @@ class MixedRetNetTransformer(nn.Module):
             if self.binary_vector[i] == "1":
                 Y = self.retentions[i](self.layer_norms_1[i](X))
             else:
-                Y = self.attentions[i](self.layer_norms_1[i](X), self.mask)
+                Y = self.retentions[i](self.layer_norms_1[i](X), self.mask)
             Y = self.dropout(Y)
             Y = Y + X
             Z = self.ffns[i](self.layer_norms_2[i](Y))
