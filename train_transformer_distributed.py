@@ -204,6 +204,8 @@ def main(args, run):
                 loss = criterion(pred.view(-1, vocab_size), target.view(-1))
                 # assert loss.ndim == 0
                 loss.backward()
+                
+                torch.nn.utils.clip_grad_norm_(net.parameters(), args.clipval)
                 optimizer.step()
                 wandb.log({"loss": loss.item()})
                 if (count % PRINT_EVERY) == 0:
@@ -265,6 +267,7 @@ if __name__ == '__main__':
     parser.add_argument('--randomseed', type=int, default=0)
     parser.add_argument('--numsteps', type=int, default=-1, help="number of steps to run, -1 for full dataset")
     parser.add_argument('--project', type=str, default="retformer1")
+    parser.add_argument('--clipval', type=float, default=1.0)
 
     args = parser.parse_args()
     

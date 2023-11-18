@@ -15,9 +15,9 @@ class AttentionHead(nn.Module):
       self.linear_Q = nn.Linear(input_size, hidden_size)
       self.linear_K = nn.Linear(input_size, hidden_size)
       self.linear_V = nn.Linear(input_size, hidden_size)
+    
 
-
-    def forward(self, input):
+    def forward(self, input, mask):
       """
       Input has shape (batch_size, MAX_SEQ_LENGTH, input_size)
       """
@@ -25,7 +25,6 @@ class AttentionHead(nn.Module):
 
       # TODO
       # use @cache
-      mask = self.get_mask(batch_size, seq_length).to(input.device)
 
       queries = self.linear_Q(input)
       keys = self.linear_K(input)
@@ -39,8 +38,6 @@ class AttentionHead(nn.Module):
 
       return output
 
-    def get_mask(self, batch_size, sequence_length):
-        return torch.ones(batch_size, sequence_length, sequence_length).tril()
 
 class MultiHeadedAttention(nn.Module):
   def __init__(self, hidden_size, num_heads):
@@ -56,11 +53,11 @@ class MultiHeadedAttention(nn.Module):
 
     self.proj = nn.Linear(hidden_size, hidden_size)
 
-  def forward(self, input):
+  def forward(self, input, mask):
     """
     Input has shape (batch_size, MAX_SEQ_LENGTH, input_size)
     """
-    return self.proj(torch.concat([head(input) for head in self.heads], dim=-1))
+    return self.proj(torch.concat([head(input, mask) for head in self.heads], dim=-1))
 
 class Transformer(nn.Module):
     def __init__(self, layers, hidden_dim, ffn_size, heads, vocab_size, dropout):
@@ -74,7 +71,7 @@ class Transformer(nn.Module):
         self.embed = nn.Embedding(vocab_size, hidden_dim)
         self.proj = nn.Linear(hidden_dim, vocab_size)
         self.dropout = nn.Dropout(dropout)
-        
+        self.register_buffer("mask", None)
         self.attentions = nn.ModuleList([
             MultiHeadedAttention(hidden_dim, heads)
             for _ in range(layers)
@@ -101,8 +98,10 @@ class Transformer(nn.Module):
         X: (batch_size, sequence_length, hidden_size)
         """
         X = self.embed(X)
+        if self.mask is None or self.mask.shape[0] != X.shape[1]:
+            self.mask = torch.ones(X.shape[1], X.shape[1]).tril().to(X.device)
         for i in range(self.layers):
-            Y = self.attentions[i](self.layer_norms_1[i](X))
+            Y = self.attentions[i](self.layer_norms_1[i](X), self.mask)
             Y = self.dropout(Y)
             Y = Y + X
             Z = self.ffns[i](self.layer_norms_2[i](Y))
