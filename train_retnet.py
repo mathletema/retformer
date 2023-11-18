@@ -100,7 +100,7 @@ def main(args):
             print(f'Number of parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad)}')
         if args.resumefilename != '' and args.isdistributed==1:
             map_location = {'cuda:0': f'cuda:{device}'}
-            state_dict = torch.load(args.resumefilename, map_location=map_location)
+            state_dict = torch.load(f"{args.resumefilename}.pth", map_location=map_location)
             net.load_state_dict(state_dict)
         print(f"Time to load model (device {device}): {time.time() - time_model_loading_start}")
 
@@ -148,7 +148,7 @@ def main(args):
             count = 0
             if rank == 0:
                 validation_start_time = time.time()
-                val_ppl = evaluate(net, val_loader, vocab_size, nsamples= (len(val_set) if args.numsteps == -1 else args.numsteps) )
+                val_ppl = evaluate(net, val_loader, vocab_size, nsamples= (len(val_loader) if args.numsteps == -1 else args.numsteps) )
                 if val_ppl < best_val_ppl:
                     best_val_ppl = val_ppl
                     torch.save(net.state_dict(), f'{args.savenamebest}.pth')
@@ -188,7 +188,7 @@ def main(args):
         
         if rank == 0:
             time_test_start = time.time()
-            test_ppl = evaluate(net, test_loader, vocab_size, nsamples= (len(test_set) if args.numsteps == -1 else args.numsteps))
+            test_ppl = evaluate(net, test_loader, vocab_size, nsamples= (len(test_loader) if args.numsteps == -1 else args.numsteps))
             print(f"Test perplexity {test_ppl }")
             print(f"Time to test: {time.time() - time_test_start}")
             

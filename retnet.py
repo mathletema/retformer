@@ -71,7 +71,7 @@ class RetNet(nn.Module):
         return x_n, s_ns
     
     def forward_chunkwise(self, x_i, r_i_1s, i):
-        """
+        """`
         X: (batch_size, sequence_length, hidden_size)
         r_i_1s: list of lists of tensors of shape (batch_size, hidden_size // heads, hidden_size // heads)
 
@@ -84,3 +84,14 @@ class RetNet(nn.Module):
             x_i = self.ffns[j](self.layer_norms_2[j](y_i)) + y_i
         
         return x_i, r_is
+    
+    # generation is a little scuffed since we don't train with start/end tokens
+    @torch.inference_mode
+    def generate(self, X: torch.Tensor, max_tokens=100):
+        # X is shape batch, sequence length
+        initial_seq_len = X.shape[1]
+        
+        for i in range(initial_seq_len):
+            pass
+         
+        
