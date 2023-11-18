@@ -70,8 +70,29 @@ def evaluate(model, data_loader, vocab_size, nsamples=40):
             loss = criterion(pred.view(-1, vocab_size), target.view(-1))
             nll += loss.item()
     
-    return np.exp( nll / (nsamples))
+    return np.exp( nll / (counter))
 
+def evaluate_ddp(model, data_loader, vocab_size, nsamples=40):
+    model.eval()
+    criterion = nn.CrossEntropyLoss(reduction='mean')
+    nll = 0.0
+    counter = 0
+    
+    with torch.no_grad():
+        for x,target in data_loader:
+            if counter == nsamples:
+                break
+            counter += 1
+            x,target=x.to(model.device),target.to(model.device)
+            pred = model(x)
+            loss = criterion(pred.view(-1, vocab_size), target.view(-1))
+            nll += loss.item()
+    nll_tensor = torch.tensor([nll], device=model.device)
+    counter_tensor = torch.tensor([counter], device=model.device)
+    dist.all_reduce(nll_tensor, op=dist.ReduceOp.SUM)
+    dist.all_reduce(counter_tensor, op=dist.ReduceOp.SUM)
+
+    return np.exp( nll_tensor.item() / (counter_tensor.item()))
     
 def main(args, run):
     try:
@@ -136,10 +157,14 @@ def main(args, run):
         if args.isdistributed==1:
             train_sampler = DistributedSampler(train_set)
             train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, sampler=train_sampler, pin_memory=True, num_workers=8)
+            val_sampler = DistributedSampler(val_set)
+            val_loader = torch.utils.data.DataLoader(val_set, batch_size=BATCH_SIZE, sampler=val_sampler, pin_memory=True, num_workers=8)
+            test_sampler = DistributedSampler(test_set)
+            test_loader = torch.utils.data.DataLoader(test_set, batch_size=BATCH_SIZE, sampler=test_sampler, pin_memory=True, num_workers=8)
         else:
             train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=8)
-        val_loader = torch.utils.data.DataLoader(val_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
-        test_loader = torch.utils.data.DataLoader(test_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
+            val_loader = torch.utils.data.DataLoader(val_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
+            test_loader = torch.utils.data.DataLoader(test_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
         
         print(f"Time to create train, val, test loader and sampler (device {device}): {time.time() - time_train_loader}")
 
@@ -148,12 +173,15 @@ def main(args, run):
             
 
         for epoch in range(EPOCHS):
-            print(f"Epoch {epoch+1}/{EPOCHS}")
+            print(f"Epoch {epoch+1}/{EPOCHS} on device {device}")
             time_epoch_start = time.time()
             count = 0
-            if rank == 0:
-                validation_start_time = time.time()
+            validation_start_time = time.time()
+            if args.isdistributed==0:
                 val_ppl = evaluate(net, val_loader, vocab_size, nsamples= (len(val_loader) if args.numsteps == -1 else args.numsteps) )
+            else:
+                val_ppl = evaluate_ddp(net, val_loader, vocab_size, nsamples= (len(val_loader) if args.numsteps == -1 else args.numsteps) )
+            if rank == 0:
                 if val_ppl < best_val_ppl:
                     best_val_ppl = val_ppl
                     torch.save(net.state_dict(), f'{args.savenamebest}.pth')
@@ -192,10 +220,12 @@ def main(args, run):
             
             print(f"Time to train epoch (device {device}): {time.time() - time_epoch_start}")
 
-        
-        if rank == 0:
-            time_test_start = time.time()
+        time_test_start = time.time()
+        if args.distributed==1:
+            test_ppl = evaluate_ddp(net, test_loader, vocab_size, nsamples= (len(test_loader) if args.numsteps == -1 else args.numsteps))
+        else:
             test_ppl = evaluate(net, test_loader, vocab_size, nsamples= (len(test_loader) if args.numsteps == -1 else args.numsteps))
+        if rank == 0:
             print(f"Test perplexity {test_ppl }")
             print(f"Time to test: {time.time() - time_test_start}")
             wandb.log({"test_ppl": test_ppl})
@@ -204,10 +234,10 @@ def main(args, run):
     except Exception as e:
         print(f"Error in training: {e}")
     finally:
+        wandb.finish()
         if args.isdistributed == 1:
             dist.barrier()
             dist.destroy_process_group()
-        wandb.finish()
 
 if __name__ == '__main__':
     #args
