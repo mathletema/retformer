@@ -5,6 +5,9 @@ import numpy as np
 import os
 import wandb
 
+from ray import train, tune
+from ray.tune.search.optuna import OptunaSearch
+
 import torch
 import torch.nn as nn
 from transformers import GPT2Tokenizer
@@ -158,6 +161,8 @@ def main(args, run):
                 print(f"Validation perplexity: {val_ppl:.3f}")
                 wandb.log({"val_ppl": val_ppl})
             print(f"Reached the training barrier (device {device})")
+            if args.isdistributed==1:
+                dist.barrier()
             print(f"Starting training on device {device}")
             net.train()
             for x,target in tqdm.tqdm(train_loader):
