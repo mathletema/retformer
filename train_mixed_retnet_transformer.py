@@ -113,9 +113,9 @@ def main(args, run):
         tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
         vocab_size = len(tokenizer)
         drop_prob = args.dropprob
-        
+        binary_vector = args.binaryvector
         time_model_loading_start = time.time()
-        net = mixed_retnet_transformer.MixedRetNetTransformer(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
+        net = mixed_retnet_transformer.MixedRetNetTransformer(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob,binary_vector, double_v_dim=False).to(device)
         net.device = device
         if args.isdistributed==1:
             net = DDP(net, device_ids=[device])
@@ -265,6 +265,7 @@ if __name__ == '__main__':
     parser.add_argument('--randomseed', type=int, default=0)
     parser.add_argument('--numsteps', type=int, default=-1, help="number of steps to run, -1 for full dataset")
     parser.add_argument('--project', type=str, default="retformer1")
+    parser.add_argument('--binaryvector', type=str, default="000000000001")
 
     args = parser.parse_args()
     
