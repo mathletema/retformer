@@ -84,9 +84,9 @@ if __name__ == '__main__':
     heads = args.nheads
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     vocab_size = len(tokenizer)
-    drop_prob = args.dropprob
+
     
-    net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
+    net = retnet.RetNet(layers, hidden_dim, ffn_size, heads, len(tokenizer), 0, double_v_dim=False).to(device)
     net.device = device
     
     state_dict = torch.load(f"{args.ckpt}.pth")
