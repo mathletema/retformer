@@ -3,6 +3,7 @@ import argparse
 import time
 import numpy as np
 import os
+import wandb
 
 import torch
 import torch.nn as nn
@@ -71,7 +72,7 @@ def evaluate(model, data_loader, vocab_size, nsamples=40):
     
     return np.exp( nll / (nsamples))
 
-def main(args):
+def main(args, run):
     try:
         set_random_seeds(args.randomseed)
         if args.isdistributed==1:
@@ -154,6 +155,7 @@ def main(args):
                     torch.save(net.state_dict(), f'{args.savenamebest}.pth')
                 print(f"Time to validate: {time.time() - validation_start_time}")
                 print(f"Validation perplexity: {val_ppl:.3f}")
+                wandb.log({"val_ppl": val_ppl})
             print(f"Reached the training barrier (device {device})")
             if args.isdistributed==1:
                 dist.barrier()
@@ -171,6 +173,7 @@ def main(args):
                 # assert loss.ndim == 0
                 loss.backward()
                 optimizer.step()
+                wandb.log({"loss": loss.item()})
                 if (count % PRINT_EVERY) == 0:
                     print(f"Loss (device {device}): {loss.item()}")
                 count += 1
@@ -191,6 +194,9 @@ def main(args):
             test_ppl = evaluate(net, test_loader, vocab_size, nsamples= (len(test_loader) if args.numsteps == -1 else args.numsteps))
             print(f"Test perplexity {test_ppl }")
             print(f"Time to test: {time.time() - time_test_start}")
+            wandb.log({"test_ppl": test_ppl})
+            wandb.log_artifact(net)
+        
             
     except Exception as e:
         print(f"Error in training: {e}")
@@ -198,6 +204,7 @@ def main(args):
         if args.isdistributed == 1:
             dist.barrier()
             dist.destroy_process_group()
+        wandb.finish()
 
 if __name__ == '__main__':
     #args
@@ -224,5 +231,15 @@ if __name__ == '__main__':
     parser.add_argument('--resumefilename', type=str, default='')
     parser.add_argument('--randomseed', type=int, default=0)
     parser.add_argument('--numsteps', type=int, default=-1, help="number of steps to run, -1 for full dataset")
+    parser.add_argument('--project', type=str, default="retformer1")
+
     args = parser.parse_args()
-    main(args)
+    
+
+    run = wandb.init(
+        project=args.project,
+        group="DDP",
+    )
+    wandb.config = args
+        
+    main(args, run)
