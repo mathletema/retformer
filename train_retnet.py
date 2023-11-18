@@ -133,8 +133,11 @@ def main(args, run):
         criterion = nn.CrossEntropyLoss(reduction='mean')
         
         time_train_loader = time.time()
-        train_sampler = DistributedSampler(train_set)
-        train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, sampler=train_sampler, pin_memory=True, num_workers=8)
+        if args.isdistributed==1:
+            train_sampler = DistributedSampler(train_set)
+            train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, sampler=train_sampler, pin_memory=True, num_workers=8)
+        else:
+            train_loader = torch.utils.data.DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=8)
         val_loader = torch.utils.data.DataLoader(val_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
         test_loader = torch.utils.data.DataLoader(test_set, batch_size=BATCH_SIZE, pin_memory=True, num_workers=8)
         

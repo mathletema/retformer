@@ -68,7 +68,6 @@ if __name__ == '__main__':
     parser.add_argument('--nheads', type=int, default=12)
     parser.add_argument('--chunksize', type=int, default=2048)
     parser.add_argument('--randomseed', type=int, default=0)
-    parser.add_argument('--chunksize', type=int, default=2048)
     parser.add_argument('--twoorthree', type=int, default=3)
     args = parser.parse_args()
     
