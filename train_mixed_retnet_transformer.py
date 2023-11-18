@@ -15,7 +15,7 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 
-import transformer
+import mixed_retnet_transformer
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -115,7 +115,7 @@ def main(args, run):
         drop_prob = args.dropprob
         
         time_model_loading_start = time.time()
-        net = transformer.Transformer(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob).to(device)
+        net = mixed_retnet_transformer.MixedRetNetTransformer(layers, hidden_dim, ffn_size, heads, len(tokenizer), drop_prob, double_v_dim=False).to(device)
         net.device = device
         if args.isdistributed==1:
             net = DDP(net, device_ids=[device])

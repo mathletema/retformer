@@ -7,7 +7,6 @@ from transformer import MultiHeadedAttention
 class MixedRetNetTransformer(nn.Module):
     def __init__(self, layers, hidden_dim, ffn_size, heads, vocab_size, dropout, binary_vector, double_v_dim=False):
         super(MixedRetNetTransformer, self).__init__()
-        assert binary_vector.shape[0] == layers
         self.vocab_size = vocab_size
         self.layers = layers
         self.hidden_dim = hidden_dim
@@ -20,7 +19,7 @@ class MixedRetNetTransformer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         self.retentions = nn.ModuleList([
-            MultiScaleRetention(hidden_dim, heads, double_v_dim) if binary_vector[i] else MultiHeadedAttention(hidden_dim, heads)
+            MultiScaleRetention(hidden_dim, heads, double_v_dim) if binary_vector[i]=="1" else MultiHeadedAttention(hidden_dim, heads)
             for i in range(layers)
         ])
         self.ffns = nn.ModuleList([
