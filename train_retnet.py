@@ -161,6 +161,8 @@ def main(args, run):
                 print(f"Validation perplexity: {val_ppl:.3f}")
                 wandb.log({"val_ppl": val_ppl})
             print(f"Reached the training barrier (device {device})")
+            if args.isdistributed==1:
+                torch.distributed.barrier()
             print(f"Starting training on device {device}")
             net.train()
             for x,target in tqdm.tqdm(train_loader):
@@ -197,7 +199,6 @@ def main(args, run):
             print(f"Test perplexity {test_ppl }")
             print(f"Time to test: {time.time() - time_test_start}")
             wandb.log({"test_ppl": test_ppl})
-            wandb.log_artifact(net)
         
             
     except Exception as e:
